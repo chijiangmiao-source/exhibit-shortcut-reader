@@ -79,6 +79,19 @@ test('非法目标立即报错并清除旧结果', async ({ page }) => {
   await expect(page.locator('#target-error')).toContainText('多个主键');
 });
 
+test('判读后清空目标立即提示目标无效', async ({ page }) => {
+  await page.fill('#target-input', 'Control+A');
+  await page.click('#capture-area');
+  await page.keyboard.press('Control+A');
+  await expect(page.locator('#result-verdict')).toHaveText('匹配');
+
+  // 清空目标：立即报缺少主键，旧判读结果被清除，下载随之禁用。
+  await page.fill('#target-input', '');
+  await expect(page.locator('#target-error')).toContainText('缺少主键');
+  await expect(page.locator('#result')).toHaveCount(0);
+  await expect(page.locator('#download-btn')).toBeDisabled();
+});
+
 test('判读完成后可下载 UTF-8 JSON 结果', async ({ page }) => {
   await page.fill('#target-input', 'control+shift+a');
   await page.click('#capture-area');

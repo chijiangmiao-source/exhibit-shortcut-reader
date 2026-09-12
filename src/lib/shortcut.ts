@@ -36,6 +36,10 @@ export class ShortcutParseError extends Error {
  * 输入非法时抛出 ShortcutParseError。
  */
 export function parseCombo(input: string): string {
+  // 整体为空（含纯空白）的组合没有任何按键，直接视为缺少主键。
+  if (input.trim() === '') {
+    throw new ShortcutParseError('缺少主键');
+  }
   const tokens = input.split('+').map((token) => token.trim());
   const modifiers = new Set<Modifier>();
   const mainKeys: string[] = [];

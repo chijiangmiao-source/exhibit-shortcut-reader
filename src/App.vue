@@ -22,17 +22,11 @@ function clearResult(): void {
   match.value = null;
 }
 
-/** 目标输入变化时立即解析；非法输入立即报错并清除旧结果。 */
+/** 目标输入变化时立即解析；非法（含清空）立即报错并清除旧结果。 */
 function onTargetInput(): void {
   clearResult();
-  const raw = targetInput.value;
-  if (raw.trim() === '') {
-    targetCanonical.value = null;
-    targetError.value = null;
-    return;
-  }
   try {
-    targetCanonical.value = parseCombo(raw);
+    targetCanonical.value = parseCombo(targetInput.value);
     targetError.value = null;
   } catch (error) {
     targetCanonical.value = null;

@@ -73,9 +73,13 @@ describe('parseCombo 规范化', () => {
     expect(() => parseCombo('Enter+Space')).toThrow(/多个主键/);
   });
 
+  it('空目标视为缺少主键', () => {
+    expect(() => parseCombo('')).toThrow(/缺少主键/);
+    expect(() => parseCombo('   ')).toThrow(/缺少主键/);
+  });
+
   it('空名称报错', () => {
     expect(() => parseCombo('Control++A')).toThrow(/空的按键名称/);
-    expect(() => parseCombo('')).toThrow(/空的按键名称/);
     expect(() => parseCombo('Control+A+')).toThrow(/空的按键名称/);
   });
 });
