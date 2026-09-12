@@ -1,0 +1,12 @@
+services:
+  web:
+    build:
+      context: .
+      target: web
+    ports:
+      - "${WEB_PORT:-8080}:80"
+
+  verify:
+    build:
+      context: .
+      target: verify
