@@ -14,6 +14,15 @@ import {
   type RetestSessionState,
 } from './lib/retest';
 import { buildTargetShareUrl, resolveTargetParam } from './lib/share';
+import {
+  addFavorite,
+  FAVORITE_LIMIT,
+} from './lib/favorites';
+import {
+  getBrowserLocalStorage,
+  loadFavorites,
+  saveFavorites,
+} from './lib/favoriteStore';
 
 const targetInput = ref('');
 const targetCanonical = ref<string | null>(null);
@@ -26,6 +35,13 @@ const shareFeedbackOk = ref(false);
 // 剪贴板写入为异步：只接受最近一次复制请求的落盘结果，
 // 目标变更或发起新复制都会使在途旧请求失效，避免过期反馈覆盖最新状态。
 let copyRequestSeq = 0;
+
+// 本地收藏：MRU 顺序的规范组合列表，从浏览器存储恢复，容量上限由领域层确定。
+const favorites = ref<string[]>([]);
+const favoriteFeedback = ref<string | null>(null);
+const favoriteFeedbackOk = ref(false);
+// 存储内容存在被剔除的损坏项：展示可恢复提示，下一次成功写入后消除。
+const favoritesRecovered = ref(false);
 
 const actualCanonical = ref<string | null>(null);
 const actualError = ref<string | null>(null);
@@ -100,6 +116,59 @@ function applyTargetFromLocation(): void {
 }
 
 applyTargetFromLocation();
+
+/**
+ * 页面打开时从浏览器存储恢复收藏：损坏记录由领域层丢弃；
+ * 确有被剔除项时展示可恢复提示（下一次成功写入后清除）。
+ */
+function restoreFavoritesOnLoad(): void {
+  const storage = getBrowserLocalStorage();
+  if (storage === null) {
+    return;
+  }
+  const { favorites: restored, dropped } = loadFavorites(storage);
+  favorites.value = restored;
+  if (dropped > 0) {
+    favoritesRecovered.value = true;
+  }
+}
+
+restoreFavoritesOnLoad();
+
+/**
+ * 收藏当前规范目标：经领域层去重并重排为最近使用顺序后写入浏览器存储。
+ * 写入被拒绝时保留当前判读与列表原状，仅提示失败、不显示收藏成功。
+ */
+function favoriteCurrentTarget(): void {
+  const canonical = targetCanonical.value;
+  if (canonical === null) {
+    return;
+  }
+  const next = addFavorite(favorites.value, canonical);
+  const storage = getBrowserLocalStorage();
+  if (storage === null || !saveFavorites(storage, next)) {
+    favoriteFeedback.value = '收藏失败：浏览器存储不可用，本次结果未保存';
+    favoriteFeedbackOk.value = false;
+    return;
+  }
+  favorites.value = next;
+  favoriteFeedback.value = `已收藏：${canonical}`;
+  favoriteFeedbackOk.value = true;
+  // 成功写入后，存储内容已是当前干净列表，恢复提示不再需要。
+  favoritesRecovered.value = false;
+}
+
+/**
+ * 选择一项收藏：走与目标输入相同的解析与输入变更链路
+ * （清除旧单次结果、终止连续复测、使旧分享反馈失效），再聚焦采集区等待复核。
+ * 不修改当前地址（target 查询参数保持原样）。
+ */
+function applyFavorite(canonical: string): void {
+  targetInput.value = parseCombo(canonical);
+  onTargetInput();
+  favoriteFeedback.value = null;
+  captureAreaEl.value?.focus();
+}
 
 /** 复制目标链接：将规范目标写入当前地址的 target 参数并复制到剪贴板。 */
 async function copyShareLink(): Promise<void> {
@@ -317,6 +386,48 @@ function downloadResult(): void {
       </div>
     </section>
 
+    <section class="panel" id="favorites-panel">
+      <div class="favorites-head">
+        <p class="field-label">
+          本地收藏（按最近使用排序，最多 {{ FAVORITE_LIMIT }} 项）
+        </p>
+        <button
+          id="favorite-add-btn"
+          type="button"
+          :disabled="!judged"
+          @click="favoriteCurrentTarget"
+        >
+          收藏当前目标
+        </button>
+      </div>
+      <p
+        v-if="favoriteFeedback"
+        id="favorite-feedback"
+        :class="favoriteFeedbackOk ? 'hint' : 'error'"
+        :role="favoriteFeedbackOk ? 'status' : 'alert'"
+      >
+        {{ favoriteFeedback }}
+      </p>
+      <p v-if="favoritesRecovered" id="favorites-recovered" class="error" role="alert">
+        本地收藏存在损坏记录，已丢弃无效项；收藏新目标后将以当前列表覆盖保存。
+      </p>
+      <ul v-if="favorites.length > 0" id="favorites-list" class="favorites-list">
+        <li v-for="favorite in favorites" :key="favorite">
+          <button
+            type="button"
+            class="favorite-item"
+            :data-combo="favorite"
+            @click="applyFavorite(favorite)"
+          >
+            {{ favorite }}
+          </button>
+        </li>
+      </ul>
+      <p v-else id="favorites-empty" class="hint">
+        完成一次判读后可收藏当前规范目标，刷新页面后仍在此处载入。
+      </p>
+    </section>
+
     <section class="panel">
       <p class="field-label">采集区（点击聚焦后按下真实组合）</p>
       <div
@@ -506,6 +617,57 @@ function downloadResult(): void {
   gap: 0.75rem;
   align-items: center;
   margin-top: 0.6rem;
+}
+
+.favorites-head {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.favorites-head .field-label {
+  margin-bottom: 0;
+}
+
+#favorite-add-btn {
+  padding: 0.4rem 0.9rem;
+  font-size: 0.95rem;
+  border: none;
+  border-radius: 6px;
+  background: #2680c2;
+  color: #fff;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+#favorite-add-btn:disabled {
+  background: #9aa5b1;
+  cursor: not-allowed;
+}
+
+.favorites-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin: 0.6rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.favorite-item {
+  padding: 0.35rem 0.75rem;
+  font-size: 0.95rem;
+  border: 1px solid #9aa5b1;
+  border-radius: 6px;
+  background: #f5f7fa;
+  color: #1f2933;
+  cursor: pointer;
+}
+
+.favorite-item:hover {
+  border-color: #2680c2;
+  background: #f0f7ff;
 }
 
 .share-controls p {
