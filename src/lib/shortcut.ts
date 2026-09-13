@@ -96,11 +96,17 @@ export function isModifierOnlyKey(key: string): boolean {
 
 /**
  * 从键盘事件提取主键的规范名称；不支持的主键返回 null。
- * 字母与数字优先依据物理键位 code（KeyA / Digit1），
- * 使 Shift+1 等组合不受符号字符影响；其余按键回退到 key。
+ * 字母优先取 key 的实际输入字符，兼容字母位置与物理键位不同的布局
+ * （如 AZERTY 上标为 A 的键物理位置是 KeyQ，应记录实际输入的 A）；
+ * key 不是单字母时回退到物理键位 code。
+ * 数字优先依据物理键位 code（Digit1），使 Shift+1 等组合不受符号字符影响；
+ * 其余按键回退到 key。
  */
 export function mainKeyFromEvent(event: KeyEventLike): string | null {
   const { code, key } = event;
+  if (key.length === 1 && /^[a-zA-Z]$/.test(key)) {
+    return key.toUpperCase();
+  }
   if (/^Key[A-Z]$/.test(code)) {
     return code.slice(3);
   }
@@ -115,9 +121,6 @@ export function mainKeyFromEvent(event: KeyEventLike): string | null {
   }
   if (key === 'Escape' || key === 'Esc') {
     return 'Escape';
-  }
-  if (key.length === 1 && /^[a-zA-Z]$/.test(key)) {
-    return key.toUpperCase();
   }
   if (key.length === 1 && /^[0-9]$/.test(key)) {
     return key;

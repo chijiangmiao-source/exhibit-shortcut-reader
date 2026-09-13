@@ -115,6 +115,13 @@ describe('mainKeyFromEvent', () => {
     expect(mainKeyFromEvent(event({ key: 'Esc', code: 'Escape' }))).toBe('Escape');
   });
 
+  it('字母主键保留实际输入字符（布局与物理键位不一致时）', () => {
+    // AZERTY 等布局：标为 A 的键物理位置是 KeyQ，应记录实际输入的 A。
+    expect(mainKeyFromEvent(event({ key: 'a', code: 'KeyQ' }))).toBe('A');
+    expect(mainKeyFromEvent(event({ key: 'q', code: 'KeyA' }))).toBe('Q');
+    expect(mainKeyFromEvent(event({ key: 'A', code: 'KeyQ' }))).toBe('A');
+  });
+
   it('回退到 key 识别单字符（如小键盘数字）', () => {
     expect(mainKeyFromEvent(event({ key: 'q', code: '' }))).toBe('Q');
     expect(mainKeyFromEvent(event({ key: '3', code: 'Numpad3' }))).toBe('3');

@@ -95,7 +95,7 @@ function cancelRetest(): void {
   captureAreaEl.value?.focus();
 }
 
-/** 复测进行中：逐次记录有效组合；不支持的主键仅提示本次未计入。 */
+/** 复测进行中：逐次记录有效组合；非法组合仅提示本次未计入，不推进进度。 */
 function recordRetestSample(event: KeyboardEvent): void {
   if (session === null || session.completed) {
     return;
@@ -105,14 +105,28 @@ function recordRetestSample(event: KeyboardEvent): void {
     retestNotice.value = `本次未计入：不支持的主键 ${event.key}`;
     return;
   }
+  try {
+    session.record(combo);
+  } catch (error) {
+    // 组合本身非法（如同时按下四个修饰键）：保持原进度，仅提示本次未计入。
+    const reason =
+      error instanceof RetestError
+        ? error.message.replace(/^非法样本未入账：/, '')
+        : '组合无效';
+    retestNotice.value = `本次未计入：${reason}`;
+    return;
+  }
   retestNotice.value = null;
-  session.record(combo);
   retestState.value = session.state();
 }
 
 /** 采集区 keydown：仅当焦点位于采集区内才会触发。 */
 function onCaptureKeydown(event: KeyboardEvent): void {
   event.preventDefault();
+  // 长按触发的重复 keydown 不计入：一次物理按下只推进一次采集。
+  if (event.repeat) {
+    return;
+  }
   // 单独按修饰键不判读。
   if (isModifierOnlyKey(event.key)) {
     return;
