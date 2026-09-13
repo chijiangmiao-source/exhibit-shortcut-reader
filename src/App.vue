@@ -23,6 +23,9 @@ const targetError = ref<string | null>(null);
 const linkTargetError = ref<string | null>(null);
 const shareFeedback = ref<string | null>(null);
 const shareFeedbackOk = ref(false);
+// 剪贴板写入为异步：只接受最近一次复制请求的落盘结果，
+// 目标变更或发起新复制都会使在途旧请求失效，避免过期反馈覆盖最新状态。
+let copyRequestSeq = 0;
 
 const actualCanonical = ref<string | null>(null);
 const actualError = ref<string | null>(null);
@@ -66,9 +69,11 @@ function clearResult(): void {
 function onTargetInput(): void {
   terminateSession();
   clearResult();
-  // 目标变化后，链接说明与复制反馈均已过时。
+  // 目标变化后，链接说明与复制反馈均已过时；同时使在途复制请求失效，
+  // 其随后完成（成功或失败）时不得再把旧目标的反馈写回页面。
   linkTargetError.value = null;
   shareFeedback.value = null;
+  copyRequestSeq += 1;
   try {
     targetCanonical.value = parseCombo(targetInput.value);
     targetError.value = null;
@@ -102,12 +107,20 @@ async function copyShareLink(): Promise<void> {
   if (canonical === null) {
     return;
   }
+  // 占用最新序号：在途的较早复制请求随即失效，其完成顺序不再影响反馈。
+  const requestSeq = ++copyRequestSeq;
   const url = buildTargetShareUrl(window.location.href, canonical);
   try {
     await navigator.clipboard.writeText(url);
+    if (requestSeq !== copyRequestSeq) {
+      return;
+    }
     shareFeedback.value = '目标链接已复制，可发送给测试员复核';
     shareFeedbackOk.value = true;
   } catch {
+    if (requestSeq !== copyRequestSeq) {
+      return;
+    }
     // 剪贴板不可用或被拒绝：保留目标，仅说明失败结果。
     shareFeedback.value = '复制失败：无法访问剪贴板，请改用手动转述';
     shareFeedbackOk.value = false;

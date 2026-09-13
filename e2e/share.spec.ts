@@ -1,4 +1,80 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
+
+/**
+ * 安装可手动控制结算时机的剪贴板：每次 writeText 返回一个挂起 Promise，
+ * 测试通过 window.__clipboardController.settle(index, ok) 决定第几次调用
+ * 成功或失败，从而确定性地复现连续复制的乱序完成。
+ */
+async function installControllableClipboard(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    type Pending = {
+      resolve: () => void;
+      reject: (error: Error) => void;
+    };
+    const pending: (Pending | undefined)[] = [];
+    const controller = {
+      lastText: '' as string,
+      settle: (index: number, ok: boolean) => {
+        const item = pending[index];
+        if (item === undefined) {
+          return;
+        }
+        pending[index] = undefined;
+        if (ok) {
+          item.resolve();
+        } else {
+          item.reject(new DOMException('denied', 'NotAllowedError'));
+        }
+      },
+    };
+    Object.defineProperty(navigator, 'clipboard', {
+      value: {
+        writeText: (text: string) => {
+          controller.lastText = text;
+          return new Promise<void>((resolve, reject) => {
+            pending.push({ resolve, reject });
+          });
+        },
+      },
+      configurable: true,
+    });
+    Object.defineProperty(window, '__clipboardController', {
+      value: controller,
+      configurable: true,
+    });
+  });
+}
+
+type ClipboardController = {
+  lastText: string;
+  settle: (index: number, ok: boolean) => void;
+};
+
+async function settleClipboard(
+  page: Page,
+  index: number,
+  ok: boolean,
+): Promise<void> {
+  await page.evaluate(([i, succeeded]) => {
+    (
+      window as unknown as {
+        __clipboardController: ClipboardController;
+      }
+    ).__clipboardController.settle(i, succeeded);
+  }, [index, ok] as [number, boolean]);
+}
+
+async function lastClipboardText(page: Page): Promise<string> {
+  return page.evaluate(
+    () =>
+      (
+        window as unknown as {
+          __clipboardController: ClipboardController;
+        }
+      ).__clipboardController.lastText,
+  );
+}
+
 
 test('复制的目标链接在新页面自动预填并完成一次匹配', async ({
   page,
@@ -113,4 +189,73 @@ test('链接中的非法目标不落入页面状态并在目标区域说明', as
   await page.click('#capture-area');
   await page.keyboard.press('Control+A');
   await expect(page.locator('#result-verdict')).toHaveText('匹配');
+});
+
+test('复制后改填另一目标：旧复制随后成功不再重现过期反馈', async ({
+  page,
+}) => {
+  await installControllableClipboard(page);
+  await page.goto('/');
+  await page.fill('#target-input', 'Control+A');
+  await page.click('#copy-share-link-btn');
+
+  // 在第一次复制仍在途时改填另一目标：反馈被清空。
+  await page.fill('#target-input', 'Control+B');
+  await expect(page.locator('#share-feedback')).toHaveCount(0);
+
+  // 旧请求随后成功，新目标下仍不得出现任何旧反馈。
+  await settleClipboard(page, 0, true);
+  await expect(page.locator('#share-feedback')).toHaveCount(0);
+  await expect(page.locator('#target-canonical')).toHaveText(
+    '规范目标：Control+B',
+  );
+
+  // 新目标再次复制：反馈属于新目标且写入剪贴板的是新链接。
+  await page.click('#copy-share-link-btn');
+  await settleClipboard(page, 1, true);
+  await expect(page.locator('#share-feedback')).toContainText('已复制');
+  const copied = await lastClipboardText(page);
+  expect(new URL(copied).searchParams.get('target')).toBe('Control+B');
+});
+
+test('连续复制同一目标且后一次先成功：较早请求失败不覆盖成功反馈', async ({
+  page,
+}) => {
+  await installControllableClipboard(page);
+  await page.goto('/');
+  await page.fill('#target-input', 'Control+A');
+
+  await page.click('#copy-share-link-btn');
+  await page.click('#copy-share-link-btn');
+
+  // 后一次（第 2 次请求）先成功。
+  await settleClipboard(page, 1, true);
+  await expect(page.locator('#share-feedback')).toContainText('已复制');
+
+  // 较早请求随后失败：反馈仍保持后一次的成功结果。
+  await settleClipboard(page, 0, false);
+  const feedback = page.locator('#share-feedback');
+  await expect(feedback).toContainText('已复制');
+  await expect(feedback).toHaveClass(/hint/);
+});
+
+test('连续复制同一目标且后一次先失败：较早请求成功不覆盖失败反馈', async ({
+  page,
+}) => {
+  await installControllableClipboard(page);
+  await page.goto('/');
+  await page.fill('#target-input', 'Control+A');
+
+  await page.click('#copy-share-link-btn');
+  await page.click('#copy-share-link-btn');
+
+  // 后一次（第 2 次请求）先失败。
+  await settleClipboard(page, 1, false);
+  await expect(page.locator('#share-feedback')).toContainText('复制失败');
+
+  // 较早请求随后成功：反馈仍保持后一次的失败结果。
+  await settleClipboard(page, 0, true);
+  const feedback = page.locator('#share-feedback');
+  await expect(feedback).toContainText('复制失败');
+  await expect(feedback).toHaveClass(/error/);
 });
