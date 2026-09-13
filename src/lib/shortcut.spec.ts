@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   comboFromEvent,
+  diffCombos,
   isModifierOnlyKey,
   mainKeyFromEvent,
   parseCombo,
@@ -81,6 +82,70 @@ describe('parseCombo 规范化', () => {
   it('空名称报错', () => {
     expect(() => parseCombo('Control++A')).toThrow(/空的按键名称/);
     expect(() => parseCombo('Control+A+')).toThrow(/空的按键名称/);
+  });
+});
+
+describe('diffCombos 差异诊断', () => {
+  it('完全匹配时返回空差异', () => {
+    expect(diffCombos('Control+Shift+A', 'Control+Shift+A')).toEqual({
+      missingModifiers: [],
+      extraModifiers: [],
+      mainKey: null,
+    });
+    expect(diffCombos('Enter', 'Enter')).toEqual({
+      missingModifiers: [],
+      extraModifiers: [],
+      mainKey: null,
+    });
+  });
+
+  it('缺失修饰键按 Control、Alt、Shift、Meta 固定次序排列', () => {
+    const diff = diffCombos('Control+Alt+Shift+A', 'Control+A');
+    expect(diff.missingModifiers).toEqual(['Alt', 'Shift']);
+    expect(diff.extraModifiers).toEqual([]);
+    expect(diff.mainKey).toBeNull();
+  });
+
+  it('多余修饰键按 Control、Alt、Shift、Meta 固定次序排列', () => {
+    const diff = diffCombos('Meta+A', 'Control+Alt+Shift+Meta+A');
+    expect(diff.extraModifiers).toEqual(['Control', 'Alt', 'Shift']);
+    expect(diff.missingModifiers).toEqual([]);
+    expect(diff.mainKey).toBeNull();
+  });
+
+  it('缺失与多余同时存在时各自按固定次序排列', () => {
+    const diff = diffCombos('Alt+Shift+A', 'Control+Meta+A');
+    expect(diff.missingModifiers).toEqual(['Alt', 'Shift']);
+    expect(diff.extraModifiers).toEqual(['Control', 'Meta']);
+    expect(diff.mainKey).toBeNull();
+  });
+
+  it('主键不同时给出目标主键与实际主键', () => {
+    const diff = diffCombos('Control+A', 'Control+B');
+    expect(diff.mainKey).toEqual({ target: 'A', actual: 'B' });
+    expect(diff.missingModifiers).toEqual([]);
+    expect(diff.extraModifiers).toEqual([]);
+  });
+
+  it('修饰键差异与主键差异可同时存在', () => {
+    const diff = diffCombos('Shift+A', 'Control+B');
+    expect(diff.missingModifiers).toEqual(['Shift']);
+    expect(diff.extraModifiers).toEqual(['Control']);
+    expect(diff.mainKey).toEqual({ target: 'A', actual: 'B' });
+  });
+});
+
+describe('按实际组合更新目标的校验', () => {
+  it('合法实际组合规范化为新目标', () => {
+    expect(parseCombo('Control+B')).toBe('Control+B');
+    expect(parseCombo('Alt+Shift+Enter')).toBe('Alt+Shift+Enter');
+  });
+
+  it('四个修饰键的实际组合被领域校验拒绝', () => {
+    expect(() => parseCombo('Control+Alt+Shift+Meta+A')).toThrow(
+      ShortcutParseError,
+    );
+    expect(() => parseCombo('Control+Alt+Shift+Meta+A')).toThrow(/超过三个/);
   });
 });
 

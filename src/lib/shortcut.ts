@@ -82,6 +82,41 @@ export function parseCombo(input: string): string {
   return [...ordered, mainKeys[0]].join('+');
 }
 
+/** 两个规范组合之间的结构化差异。 */
+export interface ComboDiff {
+  /** 目标有而实际缺失的修饰键，按 Control、Alt、Shift、Meta 固定次序排列。 */
+  readonly missingModifiers: readonly Modifier[];
+  /** 实际多按的修饰键，次序同上。 */
+  readonly extraModifiers: readonly Modifier[];
+  /** 主键不同时给出目标主键与实际主键；相同则为 null。 */
+  readonly mainKey: { readonly target: string; readonly actual: string } | null;
+}
+
+/**
+ * 比较两个规范组合，返回结构化差异诊断。
+ * 输入须为 parseCombo 规范化后的字符串；完全匹配时返回空差异。
+ */
+export function diffCombos(target: string, actual: string): ComboDiff {
+  const targetParts = target.split('+');
+  const actualParts = actual.split('+');
+  const targetMainKey = targetParts[targetParts.length - 1];
+  const actualMainKey = actualParts[actualParts.length - 1];
+  const targetModifiers = new Set(targetParts.slice(0, -1));
+  const actualModifiers = new Set(actualParts.slice(0, -1));
+  return {
+    missingModifiers: MODIFIER_ORDER.filter(
+      (name) => targetModifiers.has(name) && !actualModifiers.has(name),
+    ),
+    extraModifiers: MODIFIER_ORDER.filter(
+      (name) => actualModifiers.has(name) && !targetModifiers.has(name),
+    ),
+    mainKey:
+      targetMainKey === actualMainKey
+        ? null
+        : { target: targetMainKey, actual: actualMainKey },
+  };
+}
+
 /** 判读所需的键盘事件最小接口，便于在 Node 环境下测试。 */
 export interface KeyEventLike {
   key: string;

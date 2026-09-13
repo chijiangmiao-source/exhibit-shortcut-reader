@@ -2,6 +2,7 @@
 import { computed, ref } from 'vue';
 import {
   comboFromEvent,
+  diffCombos,
   isModifierOnlyKey,
   parseCombo,
   ShortcutParseError,
@@ -20,6 +21,7 @@ const targetError = ref<string | null>(null);
 const actualCanonical = ref<string | null>(null);
 const actualError = ref<string | null>(null);
 const match = ref<boolean | null>(null);
+const updateError = ref<string | null>(null);
 
 const captureAreaEl = ref<HTMLElement | null>(null);
 
@@ -51,6 +53,7 @@ function clearResult(): void {
   actualCanonical.value = null;
   actualError.value = null;
   match.value = null;
+  updateError.value = null;
 }
 
 /** 目标输入变化时立即解析；非法（含清空）立即报错并清除旧结果，同时终止复测会话。 */
@@ -143,6 +146,7 @@ function onCaptureKeydown(event: KeyboardEvent): void {
     return;
   }
   actualError.value = null;
+  updateError.value = null;
   actualCanonical.value = combo;
   match.value =
     targetCanonical.value !== null ? combo === targetCanonical.value : null;
@@ -154,6 +158,34 @@ const judged = computed(
     targetCanonical.value !== null &&
     actualCanonical.value !== null,
 );
+
+/** 单次判读不匹配时的结构化差异诊断；匹配或未判读时为 null。 */
+const comboDiff = computed(() => {
+  if (!judged.value || match.value) {
+    return null;
+  }
+  return diffCombos(targetCanonical.value!, actualCanonical.value!);
+});
+
+/**
+ * 按实际组合更新目标：先经领域解析链路校验，拒绝时保留原目标与本次判读；
+ * 通过后复用目标输入链路（清除旧结果、终止复测会话），等待下一次采集。
+ */
+function applyActualAsTarget(): void {
+  const actual = actualCanonical.value;
+  if (actual === null) {
+    return;
+  }
+  try {
+    targetInput.value = parseCombo(actual);
+  } catch (error) {
+    updateError.value =
+      error instanceof ShortcutParseError ? error.message : '目标组合无效';
+    return;
+  }
+  onTargetInput();
+  captureAreaEl.value?.focus();
+}
 
 /** 判读完成后下载 UTF-8 JSON 结果。 */
 function downloadResult(): void {
@@ -240,6 +272,43 @@ function downloadResult(): void {
       <p v-else id="result-pending" class="hint">
         请先填写有效的目标组合以完成判读
       </p>
+      <div v-if="comboDiff" id="diff-diagnosis" class="diagnosis">
+        <p
+          v-if="comboDiff.missingModifiers.length > 0"
+          id="diff-missing"
+          class="row diff diff-missing"
+        >
+          <span class="row-label">缺失修饰键：</span>
+          <span>{{ comboDiff.missingModifiers.join('、') }}</span>
+        </p>
+        <p
+          v-if="comboDiff.extraModifiers.length > 0"
+          id="diff-extra"
+          class="row diff diff-extra"
+        >
+          <span class="row-label">多余修饰键：</span>
+          <span>{{ comboDiff.extraModifiers.join('、') }}</span>
+        </p>
+        <p
+          v-if="comboDiff.mainKey !== null"
+          id="diff-main-key"
+          class="row diff diff-main-key"
+        >
+          <span class="row-label">主键不同：</span>
+          <span>目标 {{ comboDiff.mainKey.target }}，实际 {{ comboDiff.mainKey.actual }}</span>
+        </p>
+        <button
+          v-if="!retestState"
+          id="update-target-btn"
+          type="button"
+          @click="applyActualAsTarget"
+        >
+          按实际组合更新目标
+        </button>
+        <p v-if="updateError" id="update-error" class="error" role="alert">
+          无法更新目标：{{ updateError }}
+        </p>
+      </div>
     </section>
 
     <section class="panel" id="retest-panel">
@@ -392,6 +461,35 @@ function downloadResult(): void {
 .verdict.mismatch {
   color: #c0392b;
   font-weight: 700;
+}
+
+.diagnosis {
+  margin-top: 0.5rem;
+  padding-top: 0.5rem;
+  border-top: 1px dashed #9aa5b1;
+}
+
+.diff-missing {
+  color: #b7791f;
+}
+
+.diff-extra {
+  color: #6b46c1;
+}
+
+.diff-main-key {
+  color: #c0392b;
+}
+
+#update-target-btn {
+  margin-top: 0.4rem;
+  padding: 0.4rem 0.9rem;
+  font-size: 0.95rem;
+  border: none;
+  border-radius: 6px;
+  background: #2680c2;
+  color: #fff;
+  cursor: pointer;
 }
 
 #download-btn {
