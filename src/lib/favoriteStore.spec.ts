@@ -45,38 +45,58 @@ describe('收藏的写入与读取往返', () => {
   it('空列表同样可往返', () => {
     const storage = memoryStorage();
     expect(saveFavorites(storage, [])).toBe(true);
-    expect(loadFavorites(storage)).toEqual({ favorites: [], dropped: 0 });
+    expect(loadFavorites(storage)).toEqual({
+      favorites: [],
+      dropped: 0,
+      corrupted: false,
+    });
   });
 });
 
 describe('存储内容损坏', () => {
-  it('整体 JSON 损坏时按空列表恢复且不抛异常', () => {
+  it('整体 JSON 损坏时清空并标记 corrupted 且不抛异常', () => {
     const storage = memoryStorage();
     saveFavorites(storage, ['Control+A']);
     storage.setItem(FAVORITES_STORAGE_KEY, '{not-json');
-    expect(loadFavorites(storage)).toEqual({ favorites: [], dropped: 0 });
+    expect(loadFavorites(storage)).toEqual({
+      favorites: [],
+      dropped: 0,
+      corrupted: true,
+    });
   });
 
-  it('外层形态不符（非对象、缺版本、favorites 非数组）时按空列表恢复', () => {
+  it('外层形态不符（非对象、缺版本、favorites 非数组）时清空并标记 corrupted', () => {
     const storage = memoryStorage();
 
     storage.setItem(FAVORITES_STORAGE_KEY, JSON.stringify(['Control+A']));
-    expect(loadFavorites(storage)).toEqual({ favorites: [], dropped: 0 });
+    expect(loadFavorites(storage)).toEqual({
+      favorites: [],
+      dropped: 0,
+      corrupted: true,
+    });
 
     storage.setItem(
       FAVORITES_STORAGE_KEY,
       JSON.stringify({ favorites: ['Control+A'] }),
     );
-    expect(loadFavorites(storage)).toEqual({ favorites: [], dropped: 0 });
+    expect(loadFavorites(storage)).toEqual({
+      favorites: [],
+      dropped: 0,
+      corrupted: true,
+    });
 
     storage.setItem(
       FAVORITES_STORAGE_KEY,
       JSON.stringify({ version: 1, favorites: 'Control+A' }),
     );
-    expect(loadFavorites(storage)).toEqual({ favorites: [], dropped: 0 });
+    expect(loadFavorites(storage)).toEqual({
+      favorites: [],
+      dropped: 0,
+      corrupted: true,
+    });
   });
 
-  it('混合损坏记录：丢弃无效项、保留有效项并报告丢弃条数', () => {
+  it('混合损坏记录：丢弃无效项、保留有效项并报告丢弃条数，不标记整体损坏', () => {
     const storage = memoryStorage();
     storage.setItem(
       FAVORITES_STORAGE_KEY,
@@ -95,22 +115,25 @@ describe('存储内容损坏', () => {
     expect(loadFavorites(storage)).toEqual({
       favorites: ['Control+A', 'Meta+Z'],
       dropped: 4,
+      corrupted: false,
     });
   });
 
-  it('无存储记录时返回空列表', () => {
+  it('无存储记录时返回空列表且不标记损坏', () => {
     expect(loadFavorites(memoryStorage())).toEqual({
       favorites: [],
       dropped: 0,
+      corrupted: false,
     });
   });
 });
 
 describe('存储不可用或写入被拒绝', () => {
-  it('getItem 抛错时按空列表恢复且不抛异常', () => {
+  it('getItem 抛错时按空列表恢复、不标记损坏且不抛异常', () => {
     expect(loadFavorites(memoryStorage({ getItemThrows: true }))).toEqual({
       favorites: [],
       dropped: 0,
+      corrupted: false,
     });
   });
 

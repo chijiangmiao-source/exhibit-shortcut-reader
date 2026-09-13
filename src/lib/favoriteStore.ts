@@ -36,34 +36,37 @@ function isSerializedFavorites(value: unknown): value is SerializedFavorites {
 }
 
 /**
- * 读取收藏：返回经领域层甄别后的规范组合列表与丢弃条数。
- * 存储缺失、不可读或 JSON 损坏一律视为无有效记录（dropped 记 0），
- * 仅当确实读到数组形态但其中存在被剔除的项时才报告丢弃。
+ * 读取收藏：返回经领域层甄别后的规范组合列表、逐项丢弃条数与整体损坏标志。
+ * - 存储缺失或不可读：空列表、corrupted=false（无法判定曾有数据，不提示）；
+ * - JSON 无法解析或外层形态不符：曾有数据但整体不可读，corrupted=true，
+ *   调用方须提示数据已被丢弃；
+ * - 外层有效但数组内存在被剔除的项：corrupted=false，由 dropped 计数提示。
  */
 export function loadFavorites(storage: FavoriteStorageLike): {
   favorites: string[];
   dropped: number;
+  corrupted: boolean;
 } {
   let raw: string | null;
   try {
     raw = storage.getItem(FAVORITES_STORAGE_KEY);
   } catch {
-    return { favorites: [], dropped: 0 };
+    return { favorites: [], dropped: 0, corrupted: false };
   }
   if (raw === null) {
-    return { favorites: [], dropped: 0 };
+    return { favorites: [], dropped: 0, corrupted: false };
   }
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
   } catch {
-    // 无法解析的整体损坏内容：没有可保留的项，也无法逐项计数。
-    return { favorites: [], dropped: 0 };
+    // 存储中确有内容但无法解析：旧数据整体不可恢复，须提示已丢弃。
+    return { favorites: [], dropped: 0, corrupted: true };
   }
   if (!isSerializedFavorites(parsed) || !Array.isArray(parsed.favorites)) {
-    return { favorites: [], dropped: 0 };
+    return { favorites: [], dropped: 0, corrupted: true };
   }
-  return restoreFavorites(parsed.favorites);
+  return { ...restoreFavorites(parsed.favorites), corrupted: false };
 }
 
 /**

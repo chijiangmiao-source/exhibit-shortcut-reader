@@ -174,6 +174,37 @@ test('存储内容损坏时丢弃无效项并展示可恢复提示，成功收�
   ).toHaveText('Alt+Enter');
 });
 
+test('存储整体损坏（非法 JSON）重新打开后清空收藏并提示已丢弃，成功收藏后消除', async ({
+  page,
+}) => {
+  await page.addInitScript(
+    ([key, raw]) => {
+      // 仅在首次进入时种入损坏内容；reload 后须读到页面自身写入的干净列表。
+      if (window.localStorage.getItem(key) === null) {
+        window.localStorage.setItem(key, raw);
+      }
+    },
+    [FAVORITES_STORAGE_KEY, '{not-json'] as [string, string],
+  );
+
+  await page.goto('/');
+  // 旧收藏全部不可恢复：列表清空，同时明确提示数据已丢弃而非静默。
+  await expect(page.locator('#favorites-list')).toHaveCount(0);
+  await expect(page.locator('#favorites-empty')).toBeVisible();
+  const recovered = page.locator('#favorites-recovered');
+  await expect(recovered).toContainText('损坏');
+  await expect(recovered).toContainText('丢弃');
+
+  // 成功收藏新目标后提示消除；刷新后存储已是干净列表，提示不再出现。
+  await judgeMatching(page, 'Control+A');
+  await page.click('#favorite-add-btn');
+  await expect(page.locator('#favorite-feedback')).toContainText('已收藏');
+  await expect(recovered).toHaveCount(0);
+  await page.reload();
+  await expect(page.locator('#favorites-recovered')).toHaveCount(0);
+  await expect(page.locator('#favorites-list .favorite-item')).toHaveCount(1);
+});
+
 test('无收藏数据时单次判读、差异诊断、复测与下载等原流程可用', async ({
   page,
 }) => {

@@ -119,16 +119,16 @@ applyTargetFromLocation();
 
 /**
  * 页面打开时从浏览器存储恢复收藏：损坏记录由领域层丢弃；
- * 确有被剔除项时展示可恢复提示（下一次成功写入后清除）。
+ * 逐项剔除或整体内容不可读时展示可恢复提示（下一次成功写入后清除）。
  */
 function restoreFavoritesOnLoad(): void {
   const storage = getBrowserLocalStorage();
   if (storage === null) {
     return;
   }
-  const { favorites: restored, dropped } = loadFavorites(storage);
+  const { favorites: restored, dropped, corrupted } = loadFavorites(storage);
   favorites.value = restored;
-  if (dropped > 0) {
+  if (corrupted || dropped > 0) {
     favoritesRecovered.value = true;
   }
 }
@@ -409,7 +409,7 @@ function downloadResult(): void {
         {{ favoriteFeedback }}
       </p>
       <p v-if="favoritesRecovered" id="favorites-recovered" class="error" role="alert">
-        本地收藏存在损坏记录，已丢弃无效项；收藏新目标后将以当前列表覆盖保存。
+        本地收藏数据已损坏，无效内容已被丢弃；收藏新目标后将以当前列表覆盖保存。
       </p>
       <ul v-if="favorites.length > 0" id="favorites-list" class="favorites-list">
         <li v-for="favorite in favorites" :key="favorite">
