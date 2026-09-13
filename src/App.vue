@@ -13,10 +13,16 @@ import {
   RetestSession,
   type RetestSessionState,
 } from './lib/retest';
+import { buildTargetShareUrl, resolveTargetParam } from './lib/share';
 
 const targetInput = ref('');
 const targetCanonical = ref<string | null>(null);
 const targetError = ref<string | null>(null);
+
+// 分享链接：链接中非法目标的就地说明，以及复制结果反馈。
+const linkTargetError = ref<string | null>(null);
+const shareFeedback = ref<string | null>(null);
+const shareFeedbackOk = ref(false);
 
 const actualCanonical = ref<string | null>(null);
 const actualError = ref<string | null>(null);
@@ -60,6 +66,9 @@ function clearResult(): void {
 function onTargetInput(): void {
   terminateSession();
   clearResult();
+  // 目标变化后，链接说明与复制反馈均已过时。
+  linkTargetError.value = null;
+  shareFeedback.value = null;
   try {
     targetCanonical.value = parseCombo(targetInput.value);
     targetError.value = null;
@@ -67,6 +76,41 @@ function onTargetInput(): void {
     targetCanonical.value = null;
     targetError.value =
       error instanceof ShortcutParseError ? error.message : '目标组合无效';
+  }
+}
+
+/**
+ * 页面加载时读取地址中的 target 参数：合法值经现有解析链路预填目标输入框，
+ * 非法值不落入页面状态，仅在目标区域说明链接中的组合无效。
+ * 只预填目标，不触发判读、不创建复测样本。
+ */
+function applyTargetFromLocation(): void {
+  const resolution = resolveTargetParam(window.location.href);
+  if (resolution.kind === 'valid') {
+    targetInput.value = resolution.canonical;
+    onTargetInput();
+  } else if (resolution.kind === 'invalid') {
+    linkTargetError.value = `链接中的目标组合无效：${resolution.reason}`;
+  }
+}
+
+applyTargetFromLocation();
+
+/** 复制目标链接：将规范目标写入当前地址的 target 参数并复制到剪贴板。 */
+async function copyShareLink(): Promise<void> {
+  const canonical = targetCanonical.value;
+  if (canonical === null) {
+    return;
+  }
+  const url = buildTargetShareUrl(window.location.href, canonical);
+  try {
+    await navigator.clipboard.writeText(url);
+    shareFeedback.value = '目标链接已复制，可发送给测试员复核';
+    shareFeedbackOk.value = true;
+  } catch {
+    // 剪贴板不可用或被拒绝：保留目标，仅说明失败结果。
+    shareFeedback.value = '复制失败：无法访问剪贴板，请改用手动转述';
+    shareFeedbackOk.value = false;
   }
 }
 
@@ -232,6 +276,32 @@ function downloadResult(): void {
       <p v-else-if="targetCanonical" id="target-canonical" class="hint">
         规范目标：{{ targetCanonical }}
       </p>
+      <p
+        v-if="linkTargetError"
+        id="link-target-error"
+        class="error"
+        role="alert"
+      >
+        {{ linkTargetError }}
+      </p>
+      <div class="share-controls">
+        <button
+          id="copy-share-link-btn"
+          type="button"
+          :disabled="targetCanonical === null"
+          @click="copyShareLink"
+        >
+          复制目标链接
+        </button>
+        <p
+          v-if="shareFeedback"
+          id="share-feedback"
+          :class="shareFeedbackOk ? 'hint' : 'error'"
+          :role="shareFeedbackOk ? 'status' : 'alert'"
+        >
+          {{ shareFeedback }}
+        </p>
+      </div>
     </section>
 
     <section class="panel">
@@ -416,6 +486,32 @@ function downloadResult(): void {
   font-size: 1rem;
   border: 1px solid #9aa5b1;
   border-radius: 6px;
+}
+
+.share-controls {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+  margin-top: 0.6rem;
+}
+
+.share-controls p {
+  margin: 0;
+}
+
+#copy-share-link-btn {
+  padding: 0.4rem 0.9rem;
+  font-size: 0.95rem;
+  border: none;
+  border-radius: 6px;
+  background: #2680c2;
+  color: #fff;
+  cursor: pointer;
+}
+
+#copy-share-link-btn:disabled {
+  background: #9aa5b1;
+  cursor: not-allowed;
 }
 
 .capture {
